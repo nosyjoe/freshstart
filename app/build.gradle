@@ -1,0 +1,86 @@
+apply plugin: 'com.android.application'
+apply plugin: 'com.neenbedankt.android-apt'
+
+android {
+    compileSdkVersion 22
+    buildToolsVersion "22.0.1"
+
+    defaultConfig {
+        applicationId "de.philippengel.android.freshstart"
+        minSdkVersion 21
+        targetSdkVersion 22
+        versionCode 1
+        versionName "1.0"
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+        }
+        debug {
+            minifyEnabled false
+            // enable jacoco test report generation for debug builds
+            testCoverageEnabled = true
+        }
+    }
+
+    lintOptions {
+        // uncomment to generate lint reports without making errors fail the build
+//        abortOnError false
+    }
+
+
+    // enable release signing with separate key: supply path to keystore file, key alias,
+    // store & key password via environment variables to enable automatic signing
+    if (System.getenv("RELEASE_STORE_FILE")) {
+
+        signingConfigs {
+            release {
+                storeFile System.getenv("RELEASE_STORE_FILE")
+                storePassword System.getenv("RELEASE_STORE_PASSWD")
+                keyAlias System.getenv("RELEASE_KEY_ALIAS")
+                keyPassword System.getenv("RELEASE_KEY_PASSWD")
+            }
+        }
+
+        buildTypes {
+            release {
+                signingConfig signingConfigs.release
+            }
+        }
+    }
+
+    packagingOptions {
+        pickFirst 'META-INF/LICENSE'
+        pickFirst 'META-INF/NOTICE'
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_1_7
+        targetCompatibility JavaVersion.VERSION_1_7
+    }
+}
+
+dependencies {
+    compile 'com.google.android.gms:play-services:7.3.0'
+    compile 'com.android.support:appcompat-v7:22.1.1'
+    compile 'javax.annotation:jsr250-api:1.0'
+    compile 'com.google.dagger:dagger:2.0'
+    apt 'com.google.dagger:dagger-compiler:2.0'
+//    compile 'com.squareup.dagger:dagger:1.2.2'
+//    provided 'com.squareup.dagger:dagger-compiler:1.2.2'
+    compile 'com.jakewharton:butterknife:6.1.0'
+    compile 'com.squareup.okhttp:okhttp:2.2.0'
+    compile 'com.squareup.okhttp:okhttp-urlconnection:2.2.0'
+    compile 'me.neavo:volley:2014.12.09'
+    compile 'com.squareup.picasso:picasso:2.5.0'
+    compile 'com.fasterxml.jackson.core:jackson-databind:2.5.1'
+    
+    // testing
+    testCompile 'org.robolectric:robolectric:3.0-rc2'
+    testCompile 'org.mockito:mockito-core:2.0.8-beta'
+    testCompile 'junit:junit:4.12'
+}
+
+apply from: 'jacoco-support.gradle'
