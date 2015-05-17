@@ -3,11 +3,10 @@
  */
 package de.philippengel.android.freshstart.requests;
 
-import android.content.Context;
-import android.content.Intent;
-import android.os.Bundle;
 import android.util.Log;
 
+import com.android.volley.AuthFailureError;
+import com.android.volley.DefaultRetryPolicy;
 import com.android.volley.NetworkError;
 import com.android.volley.NetworkResponse;
 import com.android.volley.ParseError;
@@ -15,10 +14,10 @@ import com.android.volley.Response;
 import com.android.volley.VolleyError;
 import com.android.volley.VolleyLog;
 import com.android.volley.toolbox.HttpHeaderParser;
+import com.android.volley.toolbox.JsonRequest;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.core.JsonParseException;
 import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.DeserializationConfig;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.JavaType;
@@ -28,56 +27,71 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationConfig;
 import com.fasterxml.jackson.databind.type.TypeFactory;
 import com.fasterxml.jackson.databind.util.ISO8601DateFormat;
-import com.squareup.okhttp.internal.Util;
-
-import org.apache.http.HttpStatus;
 
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.UnsupportedEncodingException;
+import java.util.HashMap;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Scanner;
 import java.util.zip.GZIPInputStream;
 
-import de.philippengel.android.freshstart.util.Tools;
-
 /**
  * @author Philipp Engel <philipp@filzip.com>
  */
-public class DatabindRequest<T> extends BaseRequest<T> {
+public class DatabindRequest<T> extends JsonRequest<T> {
     private static final String TAG = DatabindRequest.class.getSimpleName();
-
+    
+    /**
+     * Charset for request.
+     */
+    protected static final String PROTOCOL_CHARSET = "utf-8";
+    public static final int INITIAL_TIMEOUT_MS = 10000;
+    public static final int MAX_NUM_RETRIES = 2;
+    public static final float BACKOFF_MULTIPLIER = 1.f;
+    private static final Map<String, String> DEFAULT_HEADER = new HashMap<String, String>(10);
+    
+    static {
+        DEFAULT_HEADER.put(Constants.ACCEPT_HEADER, "application/json");
+        DEFAULT_HEADER.put(Constants.ACCEPT_LANGUAGE_HEADER, Locale.getDefault().getLanguage());
+        DEFAULT_HEADER.put(Constants.ACCEPT_ENCODING_HEADER, "gzip");
+        defaultMapper = createObjectMapperInstance();
+    }
+    
+    private final Map<String, String> headers = new HashMap<String, String>(DEFAULT_HEADER);
     protected static final ObjectMapper defaultMapper;
     private static final byte[] EMPTY_BYTE_ARRAY = new byte[0];
     private final JavaType javaType;
-
     protected ObjectMapper mapper;
     protected Object bodyData;
-
-    static {
-        defaultMapper = createObjectMapperInstance();
-    }
-
     private Class<?> bodyJsonView;
+    private ResponseListener<T> responseListener;
 
-    public DatabindRequest(int method, String url, JavaType javaType,
-                            Response.Listener<T> listener, Response.ErrorListener errorListener) {
-        super(method, url, null, null, listener, errorListener);
+    protected DatabindRequest(int method, String url, JavaType javaType) {
+        super(method, url, null, null, null);
+        this.headers.put(Constants.USER_AGENT_HEADER, "freshstart");
+    
+        if (method == Method.GET)
+            setRetryPolicy(new DefaultRetryPolicy(INITIAL_TIMEOUT_MS, MAX_NUM_RETRIES, BACKOFF_MULTIPLIER));
+        else
+            setRetryPolicy(new DefaultRetryPolicy(INITIAL_TIMEOUT_MS, 0, 1.f));
         this.javaType = javaType;
         this.bodyJsonView = JsonViews.Transmit.class;
     }
 
-    public static <T> DatabindRequest<T> get(String url, Class<T> clazz,
-                                             Response.Listener<T> listener, Response.ErrorListener errorListener) {
-        JavaType javaType = TypeFactory.defaultInstance().uncheckedSimpleType(clazz);
-        return new DatabindRequest<T>(Method.GET, url, javaType, listener, errorListener);
+    public static <T> DatabindRequest<T> get(String url, Class<T> clazz, ResponseListener<T> listener) {
+        Builder<T> builder = new Builder<T>(Method.GET, url, clazz);
+        builder.setListener(listener);
+        return builder.build();
     }
 
-    public static <T> DatabindRequest<T> put(String url, Class<T> clazz,
-                                             Response.Listener<T> listener, Response.ErrorListener errorListener) {
-        JavaType javaType = TypeFactory.defaultInstance().uncheckedSimpleType(clazz);
-        return new DatabindRequest<T>(Method.PUT, url, javaType, listener, errorListener);
+    public static <T> DatabindRequest<T> put(String url, Class<T> clazz, Object bodyData, ResponseListener<T> listener) {
+        Builder<T> builder = new Builder<T>(Method.PUT, url, clazz);
+        builder.setListener(listener);
+        builder.setBody(bodyData);
+        return builder.build();
     }
 
     /**
@@ -88,15 +102,15 @@ public class DatabindRequest<T> extends BaseRequest<T> {
      * @param bodyData      the body to send with the post. A string will be passed directly, non-null objects will be
      *                      converted to JSON first
      * @param clazz         the result class type
-     * @param listener      the listener to receive the successful result
-     * @param errorListener the listener to be called in case of an error
+     * @param listener      the responseListener to receive the result
      * @param <T>           the type of the result in the success case
      * @return the request instance
      */
-    public static <T> DatabindRequest<T> post(String url, Class<T> clazz,
-                                              Response.Listener<T> listener, Response.ErrorListener errorListener) {
-        JavaType javaType = TypeFactory.defaultInstance().uncheckedSimpleType(clazz);
-        return new DatabindRequest<T>(Method.POST, url, javaType, listener, errorListener);
+    public static <T> DatabindRequest<T> post(String url, Class<T> clazz, Object bodyData, ResponseListener<T> listener) {
+        Builder<T> builder = new Builder<T>(Method.POST, url, clazz);
+        builder.setListener(listener);
+        builder.setBody(bodyData);
+        return builder.build();
     }
 
     /**
@@ -104,24 +118,38 @@ public class DatabindRequest<T> extends BaseRequest<T> {
      * and not a String. String values will be passed directly as body value.
      *
      * @param url           the url to post to
-     * @param bodyData      the body to send with the post. A string will be passed directly, non-null objects will be
-     *                      converted to JSON first
      * @param clazz         the result class type
-     * @param listener      the listener to receive the successful result
-     * @param errorListener the listener to be called in case of an error
+     * @param listener      the responseListener to receive the successful result
      * @param <T>           the type of the result in the success case
      * @return the request instance
      */
-    public static <T> DatabindRequest<T> delete(String url, Class<T> clazz,
-                                                Response.Listener<T> listener, Response.ErrorListener errorListener) {
-        JavaType javaType = TypeFactory.defaultInstance().uncheckedSimpleType(clazz);
-        return new DatabindRequest<T>(Method.DELETE, url, javaType, listener, errorListener);
+    public static <T> DatabindRequest<T> delete(String url, Class<T> clazz, ResponseListener<T> listener) {
+        Builder<T> builder = new Builder<T>(Method.POST, url, clazz);
+        builder.setListener(listener);
+        return builder.build();
     }
-
-    public void setBodyData(Object bodyData) {
-        this.bodyData = bodyData;
+    
+    @Override
+    public Map<String, String> getHeaders() throws AuthFailureError {
+        return headers;
     }
-
+    
+    @Override
+    protected void deliverResponse(T response) {
+        if (this.responseListener != null) {
+            responseListener.onSuccess(response);
+        }
+    }
+    
+    @Override
+    public void deliverError(VolleyError error) {
+//        logRequest();
+        
+        if (this.responseListener != null) {
+            responseListener.onError(error);
+        }
+    }
+    
     @Override
     public byte[] getBody() {
         if (bodyData instanceof byte[]) {
@@ -136,6 +164,22 @@ public class DatabindRequest<T> extends BaseRequest<T> {
                 return null;
             }
         }
+    }
+    
+    public void setListener(ResponseListener<T> listener) {
+        this.responseListener = listener;
+    }
+    
+    public void addAllHeaders(Map<? extends String, ? extends String> map) {
+        headers.putAll(map);
+    }
+    
+    public String addHeader(String key, String value) {
+        return headers.put(key, value);
+    }
+    
+    public void setBodyData(Object bodyData) {
+        this.bodyData = bodyData;
     }
 
     @Override
@@ -207,35 +251,6 @@ public class DatabindRequest<T> extends BaseRequest<T> {
         Log.e(TAG, e.getClass().getSimpleName() + " while processing response: " + e.getMessage(), e);
     }
 
-    @Override
-    public void deliverError(VolleyError error) {
-//        logRequest();
-
-        int statusCode = error.networkResponse != null ? error.networkResponse.statusCode : -1;
-        if (statusCode == HttpStatus.SC_UNPROCESSABLE_ENTITY || statusCode == HttpStatus.SC_BAD_REQUEST) {
-//            ErrorResponse errorResponse = tryToDecodeError(error.networkResponse);
-//            if (errorResponse != null) {
-//                Log.d(TAG, "Decoded API error data: " + errorResponse.toString());
-//                super.deliverError(new ApiError(error, errorResponse));
-//            } else {
-                super.deliverError(error);
-//            }
-        } else {
-            super.deliverError(error);
-        }
-    }
-
-//    private ErrorResponse tryToDecodeError(NetworkResponse response) {
-//        try {
-//            String jsonString = new String(response.data, HttpHeaderParser.parseCharset(response.headers));
-////            Log.d(TAG, "json response: " + jsonString);
-//            return getMapper().readValue(jsonString, ErrorResponse.class);
-//        } catch (Exception e) {
-//            Log.d(TAG, "Error parsing error; " + e + ": " + e.getMessage(), e);
-//            return null;
-//        }
-//    }
-
     protected String objectAsJson(Object toConvert) {
         if (toConvert == null || toConvert instanceof String) {
             return null;
@@ -294,6 +309,57 @@ public class DatabindRequest<T> extends BaseRequest<T> {
 
     public JavaType getJavaType() {
         return javaType;
+    }
+    
+    public static final class Builder<T> {
+        private final int method;
+        private final String url;
+        private final JavaType javaType;
+        private final HashMap<String, String> headers;
+        private Object body;
+        private ResponseListener<T> listener;
+        
+        public Builder(int method, String url, JavaType javaType) {
+            this.method = method;
+            this.url = url;
+            this.javaType = javaType;
+            this.headers = new HashMap<String, String>();
+        }
+        
+        public Builder(int method, String url, Class<T> clazz) {
+            this(method, url, TypeFactory.defaultInstance().uncheckedSimpleType(clazz));
+        }
+        
+        public Builder<T> setBody(Object body) {
+            this.body = body;
+            return this;
+        }
+        
+        public Builder<T> addHeader(String name, String value) {
+            headers.put(name, value);
+            return this;
+        }
+        
+        public Builder<T> setListener(ResponseListener<T> listener) {
+            this.listener = listener;
+            return this;
+        }
+        
+        public DatabindRequest<T> build() {
+            if (listener == null) {
+                throw new IllegalStateException("Listener must be set ");
+            }
+            
+            DatabindRequest<T> req = new DatabindRequest<T>(method, url, javaType);
+            req.setListener(listener);
+            
+            if (body != null) {
+                req.setBodyData(body);
+            }
+            req.addAllHeaders(headers);
+            return req;
+        }
+        
     }
 
 }

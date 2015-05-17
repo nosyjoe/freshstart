@@ -30,10 +30,11 @@ import de.philippengel.android.freshstart.data.GithubController;
 import de.philippengel.android.freshstart.data.Session;
 import de.philippengel.android.freshstart.data.model.RepositorySearchResponse;
 import de.philippengel.android.freshstart.requests.DatabindRequest;
+import de.philippengel.android.freshstart.requests.ResponseListener;
 import de.philippengel.android.freshstart.ui.adapters.RepositoriesAdapter;
 import de.philippengel.android.freshstart.util.PLog;
 
-public class MainActivity extends Activity implements Response.Listener<RepositorySearchResponse>, Response.ErrorListener {
+public class MainActivity extends Activity implements ResponseListener<RepositorySearchResponse> {
 
     @Inject
     Session session;
@@ -59,18 +60,18 @@ public class MainActivity extends Activity implements Response.Listener<Reposito
     protected void onResume() {
         super.onResume();
     
-        githubController.loadRepositories(this, this);
+        githubController.loadRepositories(this);
     }
     
     @Override
-    public void onResponse(RepositorySearchResponse repositorySearchResponse) {
-        PLog.i(this, "Successfully loaded repos, total count: " + repositorySearchResponse.getTotalCount());
+    public void onSuccess(RepositorySearchResponse response) {
+        PLog.i(this, "Successfully loaded repos, total count: " + response.getTotalCount());
         repositoriesAdapter.clear();
-        repositoriesAdapter.addAll(repositorySearchResponse.getRepositories());
+        repositoriesAdapter.addAll(response.getRepositories());
     }
     
     @Override
-    public void onErrorResponse(VolleyError volleyError) {
-        PLog.e(this, "Error loading repositories: " + volleyError);
+    public void onError(VolleyError error) {
+        PLog.e(this, "Error loading repositories: " + error);
     }
 }

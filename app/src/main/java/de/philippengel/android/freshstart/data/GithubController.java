@@ -10,6 +10,7 @@ import javax.inject.Inject;
 
 import de.philippengel.android.freshstart.data.model.RepositorySearchResponse;
 import de.philippengel.android.freshstart.requests.DatabindRequest;
+import de.philippengel.android.freshstart.requests.ResponseListener;
 
 /**
  * @author Philipp Engel <philipp@filzip.com>
@@ -23,15 +24,12 @@ public class GithubController {
         this.session = session;
     }
     
-    public void loadRepositories(Response.Listener<RepositorySearchResponse> successListener, Response.ErrorListener errorListener) {
-        DatabindRequest<RepositorySearchResponse> repositorySearchResponseDatabindRequest =
-                null;
+    public void loadRepositories(ResponseListener<RepositorySearchResponse> listener) {
         try {
-            repositorySearchResponseDatabindRequest =
-                    DatabindRequest.get("https://api.github.com/search/repositories?q=" +
-                                    URLEncoder.encode("stars:>=10000", "utf-8") + "&sort=stars",
-                            RepositorySearchResponse.class, successListener, errorListener);
-            session.addToQueue(repositorySearchResponseDatabindRequest);
+            String url = "https://api.github.com/search/repositories?q=" +
+                    URLEncoder.encode("stars:>=10000", "utf-8") + "&sort=stars";
+            DatabindRequest<RepositorySearchResponse> req = DatabindRequest.get(url, RepositorySearchResponse.class, listener);
+            session.addToQueue(req);
         } catch (UnsupportedEncodingException e) {
             e.printStackTrace();
         }
